@@ -2,7 +2,8 @@ import discord
 from discord import app_commands
 import os
 from dotenv import load_dotenv
-from db import init_db, log_task, get_last_tasks
+from db import init_db, create_task, complete_task, get_last_tasks
+from router import route_command
 
 load_dotenv()
 
@@ -33,38 +34,52 @@ async def on_ready():
 
 @client.tree.command(name="ping", description="Check if bot is alive")
 async def ping(interaction: discord.Interaction):
-    await log_task("ping", str(interaction.user.id), str(interaction.channel_id))
-    await interaction.response.send_message("pong 🏓")
+    # Defer immediately — prevents Unknown Interaction (10062) error
+    await interaction.response.defer()
+    agent = route_command("ping")
+    task_id = await create_task("ping", str(interaction.user.id), str(interaction.channel_id), agent)
+    await interaction.followup.send("pong 🏓")
+    await complete_task(task_id, "Pong sent")
 
 @client.tree.command(name="status", description="Check system status")
 async def status(interaction: discord.Interaction):
-    await log_task("status", str(interaction.user.id), str(interaction.channel_id))
-    await interaction.response.send_message("Jarvis online")
+    await interaction.response.defer()
+    agent = route_command("status")
+    task_id = await create_task("status", str(interaction.user.id), str(interaction.channel_id), agent)
+    await interaction.followup.send("Jarvis online ✅")
+    await complete_task(task_id, "Status checked")
 
 @client.tree.command(name="say", description="Send test messages to jarvis-main")
 async def say(interaction: discord.Interaction):
-    await log_task("say", str(interaction.user.id), str(interaction.channel_id))
+    await interaction.response.defer(ephemeral=True)
+    agent = route_command("say")
+    task_id = await create_task("say", str(interaction.user.id), str(interaction.channel_id), agent)
     main_channel = client.get_channel(MAIN_CHANNEL_ID)
-
     if main_channel:
         await main_channel.send("Message to #jarvis-main")
-
-    await interaction.response.send_message("Message sent to #jarvis-main ✅", ephemeral=True)
+    await interaction.followup.send("Message sent to #jarvis-main ✅", ephemeral=True)
+    await complete_task(task_id, "Message sent to jarvis-main")
 
 @client.tree.command(name="tasks", description="Show last 5 commands")
 async def tasks(interaction: discord.Interaction):
+    await interaction.response.defer()
+    # Fetch rows FIRST — before logging this command — so /tasks doesn't show itself as 'received'
     rows = await get_last_tasks(5)
+    agent = route_command("tasks")
+    task_id = await create_task("tasks", str(interaction.user.id), str(interaction.channel_id), agent)
 
     if not rows:
-        await interaction.response.send_message("No tasks logged yet.")
+        await interaction.followup.send("No tasks logged yet.")
+        await complete_task(task_id, "No tasks found")
         return
 
     lines = []
     for row in rows:
-        task_id, command, user_id, channel_id, created_at = row
-        lines.append(f"{task_id}. /{command} | user:{user_id} | channel:{channel_id} | {created_at}")
+        task_id_db, command, user_id, channel_id, created_at, task_status, agent_db, result = row
+        lines.append(f"{task_id_db}. /{command} | {task_status} | {agent_db} | {created_at}")
 
     message = "\n".join(lines)
-    await interaction.response.send_message(f"Last tasks:\n{message}")
+    await interaction.followup.send(f"Last tasks:\n{message}")
+    await complete_task(task_id, f"Displayed {len(rows)} tasks")
 
 client.run(TOKEN)
