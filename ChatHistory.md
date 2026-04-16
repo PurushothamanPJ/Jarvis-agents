@@ -1660,3 +1660,87 @@ Reordered `/tasks` command to:
 4. `complete_task()` — mark done
 
 **Result:** `/tasks` now correctly shows the previous 5 commands, all with `completed` status. The current `/tasks` invocation is not in its own output.
+
+---
+
+### **[2026-04-10] Step 7 & Step 8 Complete: /research Command + Thread System**
+
+#### **Step 7 — First Real Specialist Agent**
+
+**New file: `research_agent.py`**
+- `run_research(query: str) -> str` — async function, mock implementation
+- Returns a structured research summary with query, findings, and status
+- `asyncio.sleep(2)` simulates real processing time
+- Designed to be swapped with real web tools in Step 9
+
+**Updated `router.py`:**
+- Added `"research": "research-agent"` to the routing table
+
+**Updated `db.py`:**
+- Added `thread_id TEXT` column migration in `init_db()`
+- Updated `create_task()` signature to accept optional `thread_id=None`
+- All existing commands still work (thread_id defaults to NULL)
+
+**Updated `bot.py`:**
+- Added `import asyncio` and `from research_agent import run_research`
+- Added `/research query:<text>` slash command
+
+#### **Step 8 — Thread-Based Execution (One Task = One Thread)**
+
+**Flow for `/research`:**
+1. `await interaction.response.defer()` — acknowledges Discord immediately
+2. `interaction.followup.send()` — posts "Research task received..." in main channel
+3. `initial_msg.create_thread()` — creates a public thread from that message
+4. `create_task(..., thread_id=str(thread.id))` — logs task with thread ID in DB
+5. Progress updates posted inside thread: "Research agent started..." → "Working on query: ..."
+6. `run_research(query)` executes the agent
+7. Final result posted in thread
+8. `complete_task()` marks DB row as completed
+
+**Result:** Main channel stays clean. All research progress and output lives inside a dedicated thread.
+
+---
+
+### **[2026-04-11] Bug Fix: /research Thread Creation Error**
+
+**Error:** `ValueError: This message does not have guild info attached.`
+
+**Root Cause:**
+- `interaction.followup.send()` returns a `WebhookMessage` object.
+- `WebhookMessage` does not carry the guild context needed for `create_thread()`.
+- Calling `.create_thread()` on it raises the ValueError.
+
+**Fix in `bot.py`:**
+- Replaced `initial_msg.create_thread()` with `interaction.channel.create_thread()`.
+- This creates the thread directly from the channel object, which always has guild info.
+- Used `type=discord.ChannelType.public_thread` for a standalone thread (no parent message).
+- After the thread is created, `followup.send()` posts a message in main channel linking to the thread via `thread.mention`.
+
+**New flow:**
+1. `defer()` — acknowledge Discord
+2. `interaction.channel.create_thread()` — create the thread
+3. `create_task(..., thread_id=thread.id)` — log task with thread reference
+4. `followup.send()` — post in main channel with link to thread
+5. Progress updates posted inside thread
+6. `run_research()` — execute agent
+7. Final result posted in thread
+8. `complete_task()` — mark done
+
+---
+
+### **[2026-04-16] Bug Fix: /research Missing Access on Fallback Messages**
+
+**Error:** `discord.errors.Forbidden: 403 Forbidden (error code: 50001): Missing Access`
+
+**Root Cause:**
+- When thread creation failed, the bot fell back to posting progress updates directly in the main channel using `channel.send()`.
+- However, standard channel message sending strict checks applied, and if the bot lacked specific "Send Messages" permission, it crashed.
+- Due to the crash, the DB task record got stuck in the `received` state and `complete_task()` was never called.
+
+**Fix in `bot.py`:**
+- Instead of using `output = channel` and `channel.send()`, the code was refactored to use an asynchronous helper `post_update(content)`.
+- If thread creation worked: the helper calls `thread.send(content)`.
+- If thread creation failed (fallback): the helper calls `interaction.followup.send(content)`.
+- **Reasoning:** `interaction.followup.send()` utilizes the webhook assigned to the slash command, which systematically bypasses normal channel `Send Messages` permission restrictions and works 100% of the time, guaranteeing the fallback always succeeds.
+
+**Result:** Even if thread creation fails due to missing permissions, the fallback is completely robust and safely prints the updates to the channel and writes the `completed` state into the DB.

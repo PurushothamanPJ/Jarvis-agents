@@ -29,14 +29,18 @@ async def init_db():
             await db.execute("ALTER TABLE tasks ADD COLUMN result TEXT")
         except aiosqlite.OperationalError:
             pass
+        try:
+            await db.execute("ALTER TABLE tasks ADD COLUMN thread_id TEXT")
+        except aiosqlite.OperationalError:
+            pass  # Column already exists
         await db.commit()
 
-async def create_task(command: str, user_id: str, channel_id: str, agent: str):
+async def create_task(command: str, user_id: str, channel_id: str, agent: str, thread_id: str = None):
     """Create a new task record and return the task_id"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO tasks (command, user_id, channel_id, created_at, status, agent, result) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (command, user_id, channel_id, datetime.utcnow().isoformat(), "received", agent, None)
+            "INSERT INTO tasks (command, user_id, channel_id, created_at, status, agent, result, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (command, user_id, channel_id, datetime.utcnow().isoformat(), "received", agent, None, thread_id)
         )
         task_id = cursor.lastrowid
         await db.commit()

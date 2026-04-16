@@ -1,9 +1,11 @@
 import discord
 from discord import app_commands
 import os
+import asyncio
 from dotenv import load_dotenv
 from db import init_db, create_task, complete_task, get_last_tasks
 from router import route_command
+from research_agent import run_research
 
 load_dotenv()
 
@@ -81,5 +83,73 @@ async def tasks(interaction: discord.Interaction):
     message = "\n".join(lines)
     await interaction.followup.send(f"Last tasks:\n{message}")
     await complete_task(task_id, f"Displayed {len(rows)} tasks")
+
+
+@client.tree.command(name="research", description="Run a research query using the Research Agent")
+@app_commands.describe(query="What do you want to research?")
+async def research(interaction: discord.Interaction, query: str):
+    await interaction.response.defer()
+
+    # Use client.get_channel() — gives fully cached TextChannel object with proper access.
+    # interaction.channel can be PartialMessageable in slash commands (no real permissions).
+    channel = client.get_channel(interaction.channel_id)
+    if channel is None:
+        # Not in cache — fetch directly from Discord API
+        channel = await client.fetch_channel(interaction.channel_id)
+
+    thread_name = f"Research: {query[:80]}"
+    thread = None
+    thread_id = None
+
+    # Try to create a public thread from the proper channel object
+    try:
+        thread = await channel.create_thread(
+            name=thread_name,
+            type=discord.ChannelType.public_thread
+        )
+        thread_id = str(thread.id)
+
+        await interaction.followup.send(
+            f"🔍 Research task received for: **{query}**\n"
+            f"⤵️ Head to {thread.mention} for live updates."
+        )
+    except discord.Forbidden:
+        # Fallback: post everything directly in the channel
+        await interaction.followup.send(
+            f"🔍 Research task received for: **{query}**\n"
+            f"⚠️ *Thread creation failed. Posting updates here instead.*"
+        )
+
+    # Helper to send messages to thread if available, else fallback to followup
+    async def post_update(content: str):
+        if thread:
+            await thread.send(content)
+        else:
+            await interaction.followup.send(content)
+
+    # Log task to DB
+    agent = route_command("research")
+    task_id = await create_task(
+        "research",
+        str(interaction.user.id),
+        str(interaction.channel_id),
+        agent,
+        thread_id=thread_id
+    )
+
+    # Post progress updates
+    await post_update("🔎 Research agent started...")
+    await asyncio.sleep(1)
+    await post_update(f"📋 Working on query: **{query}**")
+
+    # Run the research agent
+    result = await run_research(query)
+
+    # Post final result
+    await post_update(result)
+
+    # Mark task completed in DB
+    await complete_task(task_id, "Research completed")
+
 
 client.run(TOKEN)

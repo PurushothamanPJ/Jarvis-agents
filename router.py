@@ -5,5 +5,6 @@ def route_command(command_name: str) -> str:
         "status": "system",
         "say": "discord-interface",
         "tasks": "system",
+        "research": "research-agent",
     }
     return routes.get(command_name, "system")
