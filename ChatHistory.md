@@ -1744,3 +1744,16 @@ Reordered `/tasks` command to:
 - **Reasoning:** `interaction.followup.send()` utilizes the webhook assigned to the slash command, which systematically bypasses normal channel `Send Messages` permission restrictions and works 100% of the time, guaranteeing the fallback always succeeds.
 
 **Result:** Even if thread creation fails due to missing permissions, the fallback is completely robust and safely prints the updates to the channel and writes the `completed` state into the DB.
+
+---
+
+### **[2026-04-16] Feature Enhancement: Dynamic /say Command**
+
+**User Request:** Change `/say` so the user can type a custom message and explicitly select which channel it sends to from a drop-down list of suggestions.
+
+**Changes made to `bot.py`:**
+- Instead of using a hardcoded `#jarvis-main` channel, added two new arguments:
+  - `message: str` — Allows the user to type whatever text they want to send.
+  - `target: discord.TextChannel` — Automatically tells Discord to present a UI drop-down menu of all Text Channels available in the server. 
+- Integrated permission handling: If the bot is blocked from sending a message into the chosen channel, it cleanly catches `discord.Forbidden` and replies to the user playfully (`❌ I don't have permission...`).
+- The task logger was updated to dynamically write `Message sent to #<channel name>` inside the SQLite DB.

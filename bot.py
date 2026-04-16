@@ -51,16 +51,20 @@ async def status(interaction: discord.Interaction):
     await interaction.followup.send("Jarvis online ✅")
     await complete_task(task_id, "Status checked")
 
-@client.tree.command(name="say", description="Send test messages to jarvis-main")
-async def say(interaction: discord.Interaction):
+@client.tree.command(name="say", description="Send a message to a specific channel")
+@app_commands.describe(message="The message to send", target="The channel to send the message to")
+async def say(interaction: discord.Interaction, message: str, target: discord.TextChannel):
     await interaction.response.defer(ephemeral=True)
     agent = route_command("say")
     task_id = await create_task("say", str(interaction.user.id), str(interaction.channel_id), agent)
-    main_channel = client.get_channel(MAIN_CHANNEL_ID)
-    if main_channel:
-        await main_channel.send("Message to #jarvis-main")
-    await interaction.followup.send("Message sent to #jarvis-main ✅", ephemeral=True)
-    await complete_task(task_id, "Message sent to jarvis-main")
+    
+    try:
+        await target.send(message)
+        await interaction.followup.send(f"Message sent to {target.mention} ✅", ephemeral=True)
+        await complete_task(task_id, f"Message sent to #{target.name}")
+    except discord.Forbidden:
+        await interaction.followup.send(f"❌ I don't have permission to send messages in {target.mention}.", ephemeral=True)
+        await complete_task(task_id, f"Failed: Missing permission for #{target.name}")
 
 @client.tree.command(name="tasks", description="Show last 5 commands")
 async def tasks(interaction: discord.Interaction):
